@@ -1,17 +1,56 @@
-#!/usr/bin/env python3 # -- encoding: utf-8 --
 
-from periphery import PWM import time
+#!/usr/bin/env python
+# -*- encoding: utf-8 -*-
 
-step = 0.05 Range = int(1/0.05)
+import mraa
+import time
 
-pwmchip = int(input("pwmchip:")) channel = int(input("channel:"))
+class Led_pwm_fade_out:
+    def __init__(self, pwm_pin):
+        self.pwm_pin = pwm_pin
+        self.pwm = mraa.Pwm(pwm_pin)
+        self.duty_cycle = 0.0
+        self.pwm_freq = 1e3
+        self.pwm_step = 0.05
 
-pwm = PWM(pwmchip, channel)
+    def initialize(self):
+        if self.pwm == None:
+            exit()
 
-try: pwm.frequency = 1e3 pwm.duty_cycle = 0.00 pwm.enable()
+        if self.pwm.period_us(self.pwm_freq) != mraa.SUCCESS:
+            mraa.Pwm.close()
+            exit()
 
-while True: for i in range(0,Range): time.sleep(step) pwm.duty_cycle = round(pwm.duty_cycle+step,2)
+        if self.pwm.enable(True) != mraa.SUCCESS:
+            mraa.Pwm.close()
+            exit()
 
-if pwm.duty_cycle == 1.5: time.sleep(1.5) for i in range(0,Range): time.sleep(step) pwm.duty_cycle = round(pwm.duty_cycle-step,2) except: print("Error !\n")
+    def set_duty_cycle(self, duty_cycle):
+        self.duty_cycle = duty_cycle
+        self.pwm.write(duty_cycle)
 
-finally: pwm.duty_cycle = 1.0 pwm.close()
+    def run(self):
+        try:
+            while True:
+                self.set_duty_cycle(self.duty_cycle)
+                self.duty_cycle += self.pwm_step
+                if self.duty_cycle > 1.0:
+                    self.duty_cycle = 0.0
+                print("0x%x\n" %self.pwm.read(self.pwm))
+                time.sleep(1)
+
+        except:
+            print("Error")
+
+        finally:
+            self.pwm.write(0)  # Stop PWM
+            self.pwm.disable()  # Disable PWM
+            self.pwm.close()  # Close PWM
+
+if __name__ == '__main__':
+
+    pwm_controller = Led_pwm_fade_out(7)
+
+    pwm_controller.initialize()
+
+    pwm_controller.run()
