@@ -56,14 +56,13 @@ std::string executeCommand(const std::string &command) {
     return result;
 }
 
-std::string executeSSHCommand(const std::string &host, const std::string &username, const std::string &password,
-                              const std::string &command) {
+std::string executeSSHCommand(const std::string &host, const std::string &username, const std::string &password, const std::string &command) {
     std::string sshCommand = "sshpass -p '" + password + "' ssh "
-                             "-o HostKeyAlgorithms=+ssh-dss -o KexAlgorithms=+diffie-hellman-group1-sha1 "
-                             "-o Ciphers=+3des-cbc -o MACs=+hmac-sha1 -o StrictHostKeyChecking=no "
-                             "-o UserKnownHostsFile=/dev/null -o LogLevel=QUIET "
-                             "-o ConnectTimeout=" + std::to_string(CONNECTION_TIMEOUT) + " "
-                             + username + "@" + host + " '" + command + "'";
+        "-o HostKeyAlgorithms=+ssh-dss -o KexAlgorithms=+diffie-hellman-group1-sha1 "
+        "-o Ciphers=+3des-cbc -o MACs=+hmac-sha1 -o StrictHostKeyChecking=no "
+        "-o UserKnownHostsFile=/dev/null -o LogLevel=QUIET "
+        "-o ConnectTimeout=" + std::to_string(CONNECTION_TIMEOUT) + " "
+        + username + "@" + host + " '" + command + "'";
 
     try {
         return executeCommand(sshCommand);
@@ -122,24 +121,32 @@ SignalData parseIwlistScan(const std::string &output) {
 void displaySignal(int signalDbm, const std::string &prefix, bool isNewBest = false) {
     std::string indicator = isNewBest ? " ** NEW BEST **" : "";
     std::cout << prefix << getSignalBars(signalDbm) << " " << std::setw(3) << signalDbm
-            << "dBm (" << getSignalQuality(signalDbm) << ")" << indicator << std::endl;
+              << "dBm (" << getSignalQuality(signalDbm) << ")" << indicator << std::endl;
+}
+
+void displayAssessment(int signalDbm) {
+    std::cout << "\nAssessment: " << getSignalQuality(signalDbm);
+    if (signalDbm > SIGNAL_VERY_STRONG_THRESHOLD) std::cout << " - No adjustment needed";
+    else if (signalDbm > SIGNAL_STRONG_THRESHOLD) std::cout << " - Minor tweaks may help";
+    else if (signalDbm > SIGNAL_MODERATE_THRESHOLD) std::cout << " - Consider adjustment";
+    else std::cout << " - Adjust antenna azimuth";
+    std::cout << std::endl;
 }
 
 void displayCurrentBest(int bestSignal, int bestMeasurement, const std::string &bestTimestamp) {
     if (bestSignal == INITIAL_BEST_SIGNAL) return;
     std::cout << "    Current best:" << std::endl
-            << "                                Timestamp: " << bestTimestamp << std::endl
-            << "                                Measurement No.: [" << bestMeasurement << "]" << std::endl
-            << "                                Signal Strength: ";
+              << "                                Timestamp: " << bestTimestamp << std::endl
+              << "                                Measurement No.: [" << bestMeasurement << "]" << std::endl
+              << "                                Signal Strength: ";
     displaySignal(bestSignal, "");
 }
 
-void alignmentMode(const std::string &host, const std::string &username, const std::string &password,
-                   const std::string &interface) {
+void alignmentMode(const std::string &host, const std::string &username, const std::string &password, const std::string &interface) {
     std::cout << "=== ANTENNA ALIGNMENT MODE ===" << std::endl
-            << "Adjust antenna azimuth slowly and observe readings" << std::endl
-            << "Press Ctrl+C when optimal position found" << std::endl
-            << std::string(50, '-') << std::endl;
+              << "Adjust antenna azimuth slowly and observe readings" << std::endl
+              << "Press Ctrl+C when optimal position found" << std::endl
+              << std::string(50, '-') << std::endl;
 
     int bestSignal = INITIAL_BEST_SIGNAL, bestMeasurement = 0, measurementCount = 0;
     std::string bestTimestamp;
@@ -169,8 +176,42 @@ void alignmentMode(const std::string &host, const std::string &username, const s
     }
 }
 
-void singleMeasurement(const std::string &host, const std::string &username, const std::string &password,
-                       const std::string &interface) {
+void manualMode(const std::string &host, const std::string &username, const std::string &password, const std::string &interface) {
+    std::cout << "=== MANUAL MEASUREMENT MODE ===" << std::endl
+              << "Press Enter to take measurement, Ctrl+C to exit" << std::endl
+              << std::string(50, '-') << std::endl;
+
+    int bestSignal = INITIAL_BEST_SIGNAL, bestMeasurement = 0, measurementCount = 0;
+    std::string bestTimestamp;
+    std::string input;
+
+    while (true) {
+        std::cout << "Press Enter for measurement [" << (measurementCount + 1) << "]...";
+        std::getline(std::cin, input);
+
+        measurementCount++;
+        std::string output = executeSSHCommand(host, username, password, "iwlist " + interface + " scan");
+        SignalData data = parseIwlistScan(output);
+
+        if (data.valid) {
+            bool isNewBest = data.signalDbm > bestSignal;
+            if (data.signalDbm > bestSignal) {
+                bestSignal = data.signalDbm;
+                bestMeasurement = measurementCount;
+                bestTimestamp = getCurrentTimestamp();
+            }
+            displaySignal(data.signalDbm, "[" + std::to_string(measurementCount) + "] ", isNewBest);
+        } else {
+            std::cout << "[" << std::setw(3) << measurementCount << "] Connection timeout or no data" << std::endl;
+        }
+
+        if (measurementCount % STATUS_UPDATE_INTERVAL == 0) {
+            displayCurrentBest(bestSignal, bestMeasurement, bestTimestamp);
+        }
+    }
+}
+
+void singleMeasurement(const std::string &host, const std::string &username, const std::string &password, const std::string &interface) {
     std::cout << "=== SINGLE MEASUREMENT ===" << std::endl;
     std::string output = executeSSHCommand(host, username, password, "iwlist " + interface + " scan");
     SignalData data = parseIwlistScan(output);
@@ -178,6 +219,7 @@ void singleMeasurement(const std::string &host, const std::string &username, con
     if (data.valid) {
         std::cout << "Timestamp: " << getCurrentTimestamp() << std::endl;
         displaySignal(data.signalDbm, "Signal Strength: ");
+        displayAssessment(data.signalDbm);
     } else {
         std::cout << "Failed to get signal data" << std::endl;
     }
@@ -188,13 +230,16 @@ int main(int argc, char *argv[]) {
         std::string arg = argv[1];
         if (arg == "-a" || arg == "--align") {
             alignmentMode(CPE_HOST, CPE_USERNAME, CPE_PASSWORD, CPE_INTERFACE);
+        } else if (arg == "-m" || arg == "--manual") {
+            manualMode(CPE_HOST, CPE_USERNAME, CPE_PASSWORD, CPE_INTERFACE);
         } else if (arg == "-h" || arg == "--help") {
             std::cout << "CPE710 Antenna Alignment Tool\nUsage: " << argv[0] << " [options]\nOptions:\n"
-                    << "  -a, --align     Real-time alignment mode\n"
-                    << "  -h, --help      Show this help\n"
-                    << "  (no options)    Single measurement\n\n"
-                    << "Signal bars: ▂▄▆█ = Very Strong, ▂▄▆ = Strong, ▂▄ = Moderate, ▂ = Weak\n"
-                    << "Targets strongest detected signal for alignment" << std::endl;
+                      << "  -a, --align     Real-time alignment mode\n"
+                      << "  -m, --manual    Manual measurement mode\n"
+                      << "  -h, --help      Show this help\n"
+                      << "  (no options)    Single measurement\n\n"
+                      << "Signal bars: ▂▄▆█ = Very Strong, ▂▄▆ = Strong, ▂▄ = Moderate, ▂ = Weak\n"
+                      << "Targets strongest detected signal for alignment" << std::endl;
             return 0;
         }
     } else {
