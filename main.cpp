@@ -25,6 +25,7 @@
 #include <thread>
 #include <iomanip>
 #include <fstream>
+#include <array>
 
 #define BUFFER_SIZE 128
 #define SIGNAL_VERY_STRONG_THRESHOLD -60
